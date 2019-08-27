@@ -110,8 +110,9 @@ public class ConsumerManager {
             consumerGroupInfo.updateChannel(clientChannelInfo, consumeType, messageModel,
                 consumeFromWhere);
         boolean r2 = consumerGroupInfo.updateSubscription(subList);
+        boolean r3 = consumerGroupInfo.updateClientIdTable(subList, clientChannelInfo.getClientId());
 
-        if (r1 || r2) {
+        if (r1 || r2 || r3) {
             if (isNotifyConsumerIdsChangedEnable) {
                 this.consumerIdsChangeListener.handle(ConsumerGroupEvent.CHANGE, group, consumerGroupInfo.getAllChannel());
             }
@@ -119,7 +120,7 @@ public class ConsumerManager {
 
         this.consumerIdsChangeListener.handle(ConsumerGroupEvent.REGISTER, group, subList);
 
-        return r1 || r2;
+        return r1 || r2 || r3;
     }
 
     public void unregisterConsumer(final String group, final ClientChannelInfo clientChannelInfo,
@@ -135,6 +136,7 @@ public class ConsumerManager {
                     this.consumerIdsChangeListener.handle(ConsumerGroupEvent.UNREGISTER, group);
                 }
             }
+            consumerGroupInfo.unregisterClientId(clientChannelInfo);
             if (isNotifyConsumerIdsChangedEnable) {
                 this.consumerIdsChangeListener.handle(ConsumerGroupEvent.CHANGE, group, consumerGroupInfo.getAllChannel());
             }
@@ -161,6 +163,7 @@ public class ConsumerManager {
                         RemotingHelper.parseChannelRemoteAddr(clientChannelInfo.getChannel()), group);
                     RemotingUtil.closeChannel(clientChannelInfo.getChannel());
                     itChannel.remove();
+                    consumerGroupInfo.unregisterClientId(clientChannelInfo);
                 }
             }
 

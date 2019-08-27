@@ -18,12 +18,14 @@ package org.apache.rocketmq.broker.client;
 
 import io.netty.channel.Channel;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.logging.InternalLogger;
@@ -39,6 +41,8 @@ public class ConsumerGroupInfo {
         new ConcurrentHashMap<String, SubscriptionData>();
     private final ConcurrentMap<Channel, ClientChannelInfo> channelInfoTable =
         new ConcurrentHashMap<Channel, ClientChannelInfo>(16);
+    private final ConcurrentHashMap<String, CopyOnWriteArraySet<String>> clientIdTable =
+        new ConcurrentHashMap<>();
     private volatile ConsumeType consumeType;
     private volatile MessageModel messageModel;
     private volatile ConsumeFromWhere consumeFromWhere;
@@ -94,10 +98,36 @@ public class ConsumerGroupInfo {
         return result;
     }
 
+    public List<String> getSubscribeClientId(String topic) {
+        List<String> result = new ArrayList<>();
+        if (clientIdTable.get(topic) != null) {
+            result.addAll(clientIdTable.get(topic));
+        }
+        return result;
+    }
+
     public void unregisterChannel(final ClientChannelInfo clientChannelInfo) {
         ClientChannelInfo old = this.channelInfoTable.remove(clientChannelInfo.getChannel());
         if (old != null) {
             log.info("unregister a consumer[{}] from consumerGroupInfo {}", this.groupName, old.toString());
+        }
+    }
+
+    public void unregisterClientId(final ClientChannelInfo clientChannelInfo) {
+        if (clientChannelInfo != null) {
+            String clientId = clientChannelInfo.getClientId();
+            Iterator<Entry<String, CopyOnWriteArraySet<String>>> it = clientIdTable.entrySet().iterator();
+            while (it.hasNext()) {
+                Entry<String, CopyOnWriteArraySet<String>> entry = it.next();
+                if (entry.getValue().contains(clientId)) {
+                    log.info("unregister clientId {} from {}", clientId, entry.getKey());
+                    entry.getValue().remove(clientId);
+                    if (entry.getValue().isEmpty()) {
+                        log.info("unregister clientId, clientId set of {} is empty, remove it.", entry.getKey());
+                        it.remove();
+                    }
+                }
+            }
         }
     }
 
@@ -107,6 +137,7 @@ public class ConsumerGroupInfo {
             log.warn(
                 "NETTY EVENT: remove not active channel[{}] from ConsumerGroupInfo groupChannelTable, consumer group: {}",
                 info.toString(), groupName);
+            unregisterClientId(info);
             return true;
         }
 
@@ -185,6 +216,10 @@ public class ConsumerGroupInfo {
                 }
             }
 
+            if (clientIdTable.get(oldTopic) != null && !clientIdTable.get(oldTopic).isEmpty()) {
+                exist = true;
+            }
+
             if (!exist) {
                 log.warn("subscription changed, group: {} remove topic {} {}",
                     this.groupName,
@@ -200,6 +235,47 @@ public class ConsumerGroupInfo {
         this.lastUpdateTimestamp = System.currentTimeMillis();
 
         return updated;
+    }
+
+    public boolean updateClientIdTable(final Set<SubscriptionData> subList, final String clientId) {
+        boolean update = false;
+
+        HashSet<String> subTopicSet = new HashSet<>();
+        for (SubscriptionData sub : subList) {
+            subTopicSet.add(sub.getTopic());
+            if (clientIdTable.get(sub.getTopic()) == null) {
+                update = true;
+                CopyOnWriteArraySet<String> clientIdSet = new CopyOnWriteArraySet<>();
+                clientIdSet.add(clientId);
+                clientIdTable.put(sub.getTopic(), clientIdSet);
+                log.info("add clientId {} into {}", clientId, sub.getTopic());
+            } else {
+                if (!clientIdTable.get(sub.getTopic()).contains(clientId)) {
+                    update = true;
+                    clientIdTable.get(sub.getTopic()).add(clientId);
+                    log.info("add clientId {} into {}", clientId, sub.getTopic());
+                }
+            }
+        }
+
+        Iterator<Entry<String, CopyOnWriteArraySet<String>>> it = clientIdTable.entrySet().iterator();
+        while (it.hasNext()) {
+            Entry<String, CopyOnWriteArraySet<String>> entry = it.next();
+            String topic = entry.getKey();
+            if (entry.getValue().contains(clientId)) {
+                if (!subTopicSet.contains(topic)) {
+                    entry.getValue().remove(clientId);
+                    update = true;
+                    log.info("remove clientId {} from {}", clientId, topic);
+                    if (entry.getValue().isEmpty()) {
+                        it.remove();
+                        log.info("remove clientId, clientId set of {} is empty, remove it.", topic);
+                    }
+                }
+            }
+        }
+
+        return update;
     }
 
     public Set<String> getSubscribeTopics() {

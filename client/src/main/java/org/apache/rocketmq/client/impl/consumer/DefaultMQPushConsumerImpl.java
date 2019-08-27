@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import org.apache.commons.lang3.StringUtils;
@@ -111,6 +112,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
     private ConsumeMessageService consumeMessageService;
     private long queueFlowControlTimes = 0;
     private long queueMaxSpanFlowControlTimes = 0;
+    private final ConcurrentHashMap<String, SubscriptionData> darkLaunchSubscription = new ConcurrentHashMap<String, SubscriptionData>();
 
     public DefaultMQPushConsumerImpl(DefaultMQPushConsumer defaultMQPushConsumer, RPCHook rpcHook) {
         this.defaultMQPushConsumer = defaultMQPushConsumer;
@@ -509,6 +511,15 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
     public void sendMessageBack(MessageExt msg, int delayLevel, final String brokerName)
         throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
+        if (isSubscriptionDarkLaunch(msg.getTopic())) {
+            sendBackToOriginalTopic(msg, delayLevel, brokerName);
+        } else {
+            sendBackToRetryTopic(msg, delayLevel, brokerName);
+        }
+    }
+
+    public void sendBackToRetryTopic(MessageExt msg, int delayLevel, final String brokerName)
+        throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         try {
             String brokerAddr = (null != brokerName) ? this.mQClientFactory.findBrokerAddressInPublish(brokerName)
                 : RemotingHelper.parseSocketAddressAddr(msg.getStoreHost());
@@ -532,6 +543,29 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             this.mQClientFactory.getDefaultMQProducer().send(newMsg);
         } finally {
             msg.setTopic(NamespaceUtil.withoutNamespace(msg.getTopic(), this.defaultMQPushConsumer.getNamespace()));
+        }
+    }
+
+    private void sendBackToOriginalTopic(MessageExt msg, int delayLevel, final String brokerName)
+        throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
+
+        Message newMsg = new Message(msg.getTopic(), msg.getBody());
+        String originMsgId = MessageAccessor.getOriginMessageId(msg);
+        MessageAccessor.setOriginMessageId(newMsg, UtilAll.isBlank(originMsgId) ? msg.getMsgId() : originMsgId);
+        newMsg.setFlag(msg.getFlag());
+        MessageAccessor.setProperties(newMsg, msg.getProperties());
+        MessageAccessor.putProperty(newMsg, MessageConst.PROPERTY_RETRY_TOPIC, msg.getTopic());
+        MessageAccessor.putProperty(newMsg, MessageConst.PROPERTY_RECONSUME_TIME, String.valueOf(msg.getReconsumeTimes() + 1));
+        MessageAccessor.setReconsumeTime(newMsg, String.valueOf(msg.getReconsumeTimes() + 1));
+        MessageAccessor.setMaxReconsumeTimes(newMsg, String.valueOf(getMaxReconsumeTimes()));
+        newMsg.setDelayTimeLevel(delayLevel);
+
+        if (msg.getReconsumeTimes() < getMaxReconsumeTimes()) {
+            this.mQClientFactory.getDefaultMQProducer().send(newMsg);
+        } else {
+            //send to retry to let message go into DLQ
+            newMsg.setTopic(MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup()));
+            this.mQClientFactory.getDefaultMQProducer().send(newMsg);
         }
     }
 
@@ -877,6 +911,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             SubscriptionData subscriptionData = FilterAPI.buildSubscriptionData(this.defaultMQPushConsumer.getConsumerGroup(),
                 topic, subExpression);
             this.rebalanceImpl.getSubscriptionInner().put(topic, subscriptionData);
+            log.info("add subscribed topic: {}", topic);
             if (this.mQClientFactory != null) {
                 this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
             }
@@ -921,6 +956,20 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         }
     }
 
+    public void markSubscriptionDarkLaunch(final String topic){
+        SubscriptionData subscriptionData = this.rebalanceImpl.getSubscriptionInner().get(topic);
+        if (subscriptionData != null) {
+            this.darkLaunchSubscription.put(topic, subscriptionData);
+            log.info("mark subscription dark launch, {}", topic);
+        } else {
+            log.warn("mark <{}> dark launch fail, subscription not found, subscribe first.", topic);
+        }
+    }
+
+    public boolean isSubscriptionDarkLaunch(final String topic) {
+        return this.darkLaunchSubscription.containsKey(topic);
+    }
+
     public void suspend() {
         this.pause = true;
         log.info("suspend this consumer, {}", this.defaultMQPushConsumer.getConsumerGroup());
@@ -928,6 +977,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
     public void unsubscribe(String topic) {
         this.rebalanceImpl.getSubscriptionInner().remove(topic);
+        this.darkLaunchSubscription.remove(topic);
     }
 
     public void updateConsumeOffset(MessageQueue mq, long offset) {
@@ -1156,6 +1206,25 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
             if (StringUtils.isNotEmpty(this.defaultMQPushConsumer.getNamespace())) {
                 msg.setTopic(NamespaceUtil.withoutNamespace(msg.getTopic(), this.defaultMQPushConsumer.getNamespace()));
+            }
+        }
+    }
+
+    public void resetReconsumeTimes(final List<MessageExt> msgs){
+        for (MessageExt msg : msgs) {
+            if (isSubscriptionDarkLaunch(msg.getTopic())) {
+                String retryTopic = msg.getProperty(MessageConst.PROPERTY_RETRY_TOPIC);
+                if (retryTopic != null && retryTopic.equals(msg.getTopic())) {
+                    String reconsumeTimes = msg.getProperty(MessageConst.PROPERTY_RECONSUME_TIME);
+                    if (reconsumeTimes != null) {
+                        int reconsumeTime = msg.getReconsumeTimes();
+                        try {
+                            reconsumeTime = Integer.parseInt(reconsumeTimes);
+                        } finally {
+                            msg.setReconsumeTimes(reconsumeTime);
+                        }
+                    }
+                }
             }
         }
     }

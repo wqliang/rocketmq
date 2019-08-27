@@ -778,6 +778,10 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
         this.defaultMQPushConsumerImpl.subscribe(withNamespace(topic), messageSelector);
     }
 
+    public void markSubscriptionDarkLaunch(final String topic) {
+        this.defaultMQPushConsumerImpl.markSubscriptionDarkLaunch(topic);
+    }
+
     /**
      * Un-subscribe the specified topic from subscription.
      *

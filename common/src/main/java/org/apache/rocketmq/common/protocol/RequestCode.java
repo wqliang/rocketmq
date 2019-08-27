@@ -180,4 +180,6 @@ public class RequestCode {
      * resume logic of checking half messages that have been put in TRANS_CHECK_MAXTIME_TOPIC before
      */
     public static final int RESUME_CHECK_HALF_MESSAGE = 323;
+
+    public static final int GET_CONSUMER_LIST_BY_GROUP_AND_TOPIC = 326;
 }
