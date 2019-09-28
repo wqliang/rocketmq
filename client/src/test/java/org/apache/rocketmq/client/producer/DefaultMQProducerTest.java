@@ -27,6 +27,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.rocketmq.client.ClientConfig;
@@ -319,24 +320,21 @@ public class DefaultMQProducerTest {
     @Test
     public void testRequestMessage() throws RemotingException, RequestTimeoutException, MQClientException, InterruptedException, MQBrokerException {
         when(mQClientAPIImpl.getTopicRouteInfoFromNameServer(anyString(), anyLong())).thenReturn(createTopicRoute());
+        final AtomicBoolean finish = new AtomicBoolean(false);
         new Thread(new Runnable() {
             @Override public void run() {
-                boolean flag = true;
-                ConcurrentHashMap<String, RequestResponseFuture> responseMap = null;
-                while (flag) {
-                    responseMap = RequestFutureTable.getRequestFutureTable();
-                    if (responseMap != null) {
-                        flag = false;
-                    }
-                }
+                ConcurrentHashMap<String, RequestResponseFuture> responseMap = RequestFutureTable.getRequestFutureTable();
                 assertThat(responseMap).isNotNull();
-                for (Map.Entry<String, RequestResponseFuture> entry : responseMap.entrySet()) {
-                    RequestResponseFuture future = entry.getValue();
-                    future.putResponseMessage(message);
+                while (!finish.get()) {
+                    for (Map.Entry<String, RequestResponseFuture> entry : responseMap.entrySet()) {
+                        RequestResponseFuture future = entry.getValue();
+                        future.putResponseMessage(message);
+                    }
                 }
             }
         }).start();
         Message result = producer.request(message, 3 * 1000L);
+        finish.getAndSet(true);
         assertThat(result.getTopic()).isEqualTo("FooBar");
         assertThat(result.getBody()).isEqualTo(new byte[] {'a'});
     }
