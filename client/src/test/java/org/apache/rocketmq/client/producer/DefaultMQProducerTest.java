@@ -208,7 +208,7 @@ public class DefaultMQProducerTest {
                 countDownLatch.countDown();
             }
         });
-        countDownLatch.await(8000L, TimeUnit.MILLISECONDS);
+        countDownLatch.await(5000L, TimeUnit.MILLISECONDS);
         assertThat(cc.get()).isEqualTo(1);
     }
 
