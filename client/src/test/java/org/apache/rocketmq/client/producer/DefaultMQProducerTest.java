@@ -48,7 +48,6 @@ import org.apache.rocketmq.common.protocol.route.BrokerData;
 import org.apache.rocketmq.common.protocol.route.QueueData;
 import org.apache.rocketmq.common.protocol.route.TopicRouteData;
 import org.apache.rocketmq.remoting.exception.RemotingException;
-import org.apache.rocketmq.remoting.exception.RemotingSendRequestException;
 import org.apache.rocketmq.remoting.netty.NettyRemotingClient;
 import org.junit.After;
 import org.junit.Before;
@@ -191,18 +190,22 @@ public class DefaultMQProducerTest {
         final CountDownLatch countDownLatch = new CountDownLatch(1);
         final AtomicInteger cc = new AtomicInteger(0);
         when(mQClientAPIImpl.getTopicRouteInfoFromNameServer(anyString(), anyLong())).thenReturn(createTopicRoute());
+        System.out.println("testSendMessageAsync_Success begin");
         producer.send(message, new SendCallback() {
             @Override
             public void onSuccess(SendResult sendResult) {
                 assertThat(sendResult.getSendStatus()).isEqualTo(SendStatus.SEND_OK);
                 assertThat(sendResult.getOffsetMsgId()).isEqualTo("123");
                 assertThat(sendResult.getQueueOffset()).isEqualTo(456L);
-                countDownLatch.countDown();
                 cc.incrementAndGet();
+                System.out.println("testSendMessageAsync_Success:OnSuccess");
+                countDownLatch.countDown();
             }
 
             @Override
             public void onException(Throwable e) {
+                System.out.println("testSendMessageAsync_Success:OnException");
+                countDownLatch.countDown();
             }
         });
         countDownLatch.await(8000L, TimeUnit.MILLISECONDS);
@@ -218,6 +221,7 @@ public class DefaultMQProducerTest {
         SendCallback sendCallback = new SendCallback() {
             @Override
             public void onSuccess(SendResult sendResult) {
+                System.out.println("testSendMessageAsync:onSuccess");
                 countDownLatch.countDown();
             }
 
@@ -226,6 +230,7 @@ public class DefaultMQProducerTest {
                 e.printStackTrace();
                 cc.incrementAndGet();
                 countDownLatch.countDown();
+                System.out.println("testSendMessageAsync:onException");
             }
         };
         MessageQueueSelector messageQueueSelector = new MessageQueueSelector() {
@@ -234,7 +239,7 @@ public class DefaultMQProducerTest {
                 return null;
             }
         };
-
+        System.err.println("testSendMessageAsync begin:");
         Message message = new Message();
         message.setTopic("test");
         message.setBody("hello world".getBytes());
