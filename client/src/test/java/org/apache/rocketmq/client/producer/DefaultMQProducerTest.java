@@ -205,7 +205,7 @@ public class DefaultMQProducerTest {
             @Override
             public void onException(Throwable e) {
                 System.out.println("testSendMessageAsync_Success:OnException");
-                countDownLatch.countDown();
+//                countDownLatch.countDown();
             }
         });
         countDownLatch.await(5000L, TimeUnit.MILLISECONDS);
