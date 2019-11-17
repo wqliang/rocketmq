@@ -113,6 +113,7 @@ public class DefaultMQProducerTest {
             .thenAnswer(new Answer() {
                 @Override
                 public Object answer(InvocationOnMock invocation) throws Throwable {
+                    System.out.println("Answer: " + this.getClass().getName() + " hashCode: " + this.hashCode() + " System.identityHashCode: " + System.identityHashCode(this));
                     CommunicationMode mode = invocation.getArgument(5);
                     switch (mode) {
                         case SYNC:
