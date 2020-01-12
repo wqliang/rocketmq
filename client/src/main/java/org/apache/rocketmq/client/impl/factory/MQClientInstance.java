@@ -1083,7 +1083,7 @@ public class MQClientInstance {
 
         if (null != brokerAddr) {
             try {
-                return this.mQClientAPIImpl.getConsumerIdListByGroup(brokerAddr, group, 3000);
+                return this.mQClientAPIImpl.getConsumerIdListByGroupAndTopic(brokerAddr, group, topic, 3000);
             } catch (Exception e) {
                 log.warn("getConsumerIdListByGroup exception, " + brokerAddr + " " + group, e);
             }

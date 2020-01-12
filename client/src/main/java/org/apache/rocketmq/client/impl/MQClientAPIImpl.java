@@ -71,6 +71,7 @@ import org.apache.rocketmq.common.protocol.body.ConsumeMessageDirectlyResult;
 import org.apache.rocketmq.common.protocol.body.ConsumeStatsList;
 import org.apache.rocketmq.common.protocol.body.ConsumerConnection;
 import org.apache.rocketmq.common.protocol.body.ConsumerRunningInfo;
+import org.apache.rocketmq.common.protocol.body.GetConsumerListByGroupAndTopicResponseBody;
 import org.apache.rocketmq.common.protocol.body.GetConsumerStatusBody;
 import org.apache.rocketmq.common.protocol.body.GroupList;
 import org.apache.rocketmq.common.protocol.body.KVTable;
@@ -100,6 +101,7 @@ import org.apache.rocketmq.common.protocol.header.GetBrokerClusterAclConfigRespo
 import org.apache.rocketmq.common.protocol.header.GetConsumeStatsInBrokerHeader;
 import org.apache.rocketmq.common.protocol.header.GetConsumeStatsRequestHeader;
 import org.apache.rocketmq.common.protocol.header.GetConsumerConnectionListRequestHeader;
+import org.apache.rocketmq.common.protocol.header.GetConsumerListByGroupAndTopicRequestHeader;
 import org.apache.rocketmq.common.protocol.header.GetConsumerListByGroupRequestHeader;
 import org.apache.rocketmq.common.protocol.header.GetConsumerListByGroupResponseBody;
 import org.apache.rocketmq.common.protocol.header.GetConsumerRunningInfoRequestHeader;
@@ -897,6 +899,35 @@ public class MQClientAPIImpl {
                 if (response.getBody() != null) {
                     GetConsumerListByGroupResponseBody body =
                         GetConsumerListByGroupResponseBody.decode(response.getBody(), GetConsumerListByGroupResponseBody.class);
+                    return body.getConsumerIdList();
+                }
+            }
+            default:
+                break;
+        }
+
+        throw new MQBrokerException(response.getCode(), response.getRemark());
+    }
+
+    public List<String> getConsumerIdListByGroupAndTopic(
+        final String addr,
+        final String consumerGroup,
+        final String topic,
+        final long timeoutMillis) throws RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException,
+        MQBrokerException, InterruptedException {
+        GetConsumerListByGroupAndTopicRequestHeader requestHeader = new GetConsumerListByGroupAndTopicRequestHeader();
+        requestHeader.setConsumerGroup(consumerGroup);
+        requestHeader.setTopic(topic);
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_CONSUMER_LIST_BY_GROUP_AND_TOPIC, requestHeader);
+
+        RemotingCommand response = this.remotingClient.invokeSync(MixAll.brokerVIPChannel(this.clientConfig.isVipChannelEnabled(), addr),
+            request, timeoutMillis);
+        assert response != null;
+        switch (response.getCode()) {
+            case ResponseCode.SUCCESS: {
+                if (response.getBody() != null) {
+                    GetConsumerListByGroupAndTopicResponseBody body =
+                        GetConsumerListByGroupAndTopicResponseBody.decode(response.getBody(), GetConsumerListByGroupAndTopicResponseBody.class);
                     return body.getConsumerIdList();
                 }
             }
